@@ -35,7 +35,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/md &lt;name&gt; - Create a new directory\n"
         "/cd &lt;path&gt; - Change current directory\n"
         "/ls - List files and directories in current directory\n"
-        "/touch - Upload a file to current directory",
+        "/touch - Upload a file to current directory\n"
+        "/get &lt;filename&gt; - Get a file from current directory\n"
+        "/del &lt;name&gt; - Delete a file or directory\n"
+        "/rename &lt;old_name&gt; &lt;new_name&gt; - Rename a file or directory",
         reply_markup=ForceReply(selective=True),
     )
 
@@ -109,6 +112,58 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("Use the /touch command to upload a file.")
 
 
+async def get_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Get a file from the current directory."""
+    if not context.args:
+        await update.message.reply_text("Please specify a file name.")
+        return
+    file_name = context.args[0]
+    current_dir = context.user_data['current_directory']
+    if file_name in current_dir.files:
+        file_id = current_dir.files[file_name]
+        try:
+            await context.bot.send_document(chat_id=update.effective_chat.id, document=file_id)
+        except Exception as e:
+            await update.message.reply_text(f"Failed to send file {file_name}: {str(e)}")
+    else:
+        await update.message.reply_text(f"File '{file_name}' not found in the current directory.")
+
+
+async def delete_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Delete a file or directory from the current directory."""
+    if not context.args:
+        await update.message.reply_text("Please specify a file or directory name.")
+        return
+    item_name = context.args[0]
+    current_dir = context.user_data['current_directory']
+    if item_name in current_dir.files:
+        del current_dir.files[item_name]
+        await update.message.reply_text(f"File '{item_name}' has been deleted.")
+    elif item_name in current_dir.subdirectories:
+        del current_dir.subdirectories[item_name]
+        await update.message.reply_text(f"Directory '{item_name}' and its contents have been deleted.")
+    else:
+        await update.message.reply_text(f"'{item_name}' not found in the current directory.")
+
+
+async def rename_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Rename a file or directory in the current directory."""
+    if len(context.args) != 2:
+        await update.message.reply_text("Please specify both old and new names.")
+        return
+    old_name, new_name = context.args
+    current_dir = context.user_data['current_directory']
+    if old_name in current_dir.files:
+        current_dir.files[new_name] = current_dir.files.pop(old_name)
+        await update.message.reply_text(f"File '{old_name}' has been renamed to '{new_name}'.")
+    elif old_name in current_dir.subdirectories:
+        current_dir.subdirectories[new_name] = current_dir.subdirectories.pop(old_name)
+        current_dir.subdirectories[new_name].name = new_name
+        await update.message.reply_text(f"Directory '{old_name}' has been renamed to '{new_name}'.")
+    else:
+        await update.message.reply_text(f"'{old_name}' not found in the current directory.")
+
+
 def main() -> None:
     """Start the bot."""
     application = Application.builder().token("7482872404:AAFjK42XWPajU_VGu71vTBkTt8rqQCGdArk").build()
@@ -118,6 +173,9 @@ def main() -> None:
     application.add_handler(CommandHandler("cd", change_directory))
     application.add_handler(CommandHandler("ls", list_directory))
     application.add_handler(CommandHandler("touch", touch))
+    application.add_handler(CommandHandler("get", get_file))
+    application.add_handler(CommandHandler("del", delete_item))
+    application.add_handler(CommandHandler("rename", rename_item))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
