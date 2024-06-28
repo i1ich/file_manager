@@ -15,26 +15,81 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+class Directory:
+    def __init__(self, name, parent=None):
+        self.name = name
+        self.parent = parent
+        self.subdirectories = {}
+        self.files = {}
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
-    if 'history' not in context.user_data:
-        context.user_data['history'] = []
-    context.user_data['history'].append(('/start', None))
+    if 'file_system' not in context.user_data:
+        context.user_data['file_system'] = Directory('/')
+        context.user_data['current_directory'] = context.user_data['file_system']
     await update.message.reply_html(
-        rf"Hello, {user.mention_html()}! I'm a bot that can help you with file uploads. "
-        "Use the /touch command to start. "
-        "Use /history to view the history of commands and file names, "
-        "or /history full for a complete history with file sending.",
+        rf"Hello, {user.mention_html()}! I'm a bot that simulates a file system. "
+        "Available commands:\n"
+        "/md &lt;name&gt; - Create a new directory\n"
+        "/cd &lt;path&gt; - Change current directory\n"
+        "/ls - List files and directories in current directory\n"
+        "/touch - Upload a file to current directory",
         reply_markup=ForceReply(selective=True),
     )
 
 
+async def make_directory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Create a new directory."""
+    if not context.args:
+        await update.message.reply_text("Please specify a directory name.")
+        return
+    dir_name = context.args[0]
+    current_dir = context.user_data['current_directory']
+    if dir_name in current_dir.subdirectories:
+        await update.message.reply_text(f"Directory '{dir_name}' already exists.")
+    else:
+        new_dir = Directory(dir_name, current_dir)
+        current_dir.subdirectories[dir_name] = new_dir
+        await update.message.reply_text(f"Directory '{dir_name}' created.")
+
+
+async def change_directory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Change the current directory."""
+    if not context.args:
+        await update.message.reply_text("Please specify a directory path.")
+        return
+    path = context.args[0]
+    current_dir = context.user_data['current_directory']
+    if path == '../':
+        if current_dir.parent:
+            context.user_data['current_directory'] = current_dir.parent
+            await update.message.reply_text(f"Changed to parent directory: {current_dir.parent.name}")
+        else:
+            await update.message.reply_text("Already in root directory.")
+    elif path in current_dir.subdirectories:
+        context.user_data['current_directory'] = current_dir.subdirectories[path]
+        await update.message.reply_text(f"Changed to directory: {path}")
+    else:
+        await update.message.reply_text(f"Directory '{path}' not found.")
+
+
+async def list_directory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List files and directories in the current directory."""
+    current_dir = context.user_data['current_directory']
+    content = "Current directory contents:\n"
+    for subdir in current_dir.subdirectories:
+        content += f"📁 {subdir}\n"
+    for file in current_dir.files:
+        content += f"📄 {file}\n"
+    if not current_dir.subdirectories and not current_dir.files:
+        content += "Directory is empty."
+    await update.message.reply_text(content)
+
+
 async def touch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Ask the user to upload a file and then display its name."""
-    if 'history' not in context.user_data:
-        context.user_data['history'] = []
-    context.user_data['history'].append(('/touch', None))
+    """Ask the user to upload a file to the current directory."""
     await update.message.reply_text("Please upload a file.")
     context.user_data['waiting_for_file'] = True
 
@@ -44,11 +99,9 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if context.user_data.get('waiting_for_file'):
         file = update.message.document
         if file:
-            if 'history' not in context.user_data:
-                context.user_data['history'] = []
-            file_obj = await file.get_file()
-            context.user_data['history'].append((None, (file.file_name, file_obj)))
-            await update.message.reply_text(f"File '{file.file_name}' successfully uploaded.")
+            current_dir = context.user_data['current_directory']
+            current_dir.files[file.file_name] = file.file_id
+            await update.message.reply_text(f"File '{file.file_name}' successfully uploaded to the current directory.")
         else:
             await update.message.reply_text("Please upload a file (not a photo or video).")
         context.user_data['waiting_for_file'] = False
@@ -56,46 +109,15 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("Use the /touch command to upload a file.")
 
 
-async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Display the history of commands and uploaded files."""
-    if 'history' not in context.user_data:
-        context.user_data['history'] = []
-
-    full_history = False
-    command_args = context.args
-    if command_args and command_args[0].lower() == 'full':
-        full_history = True
-        context.user_data['history'].append(('/history full', None))
-    else:
-        context.user_data['history'].append(('/history', None))
-
-    history = context.user_data['history']
-    if not history:
-        await update.message.reply_text("History is empty.")
-    else:
-        history_text = "Command and file history:\n"
-        for item in history:
-            if item[0]:  # This is a command
-                history_text += f"Command: {item[0]}\n"
-            elif item[1]:  # This is a file
-                file_name, file_obj = item[1]
-                history_text += f"Uploaded file: {file_name}\n"
-                if full_history:
-                    try:
-                        await update.message.reply_document(file_obj)
-                    except Exception as e:
-                        await update.message.reply_text(f"Failed to send file {file_name}: {str(e)}")
-
-        await update.message.reply_text(history_text)
-
-
 def main() -> None:
     """Start the bot."""
     application = Application.builder().token("7482872404:AAFjK42XWPajU_VGu71vTBkTt8rqQCGdArk").build()
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("md", make_directory))
+    application.add_handler(CommandHandler("cd", change_directory))
+    application.add_handler(CommandHandler("ls", list_directory))
     application.add_handler(CommandHandler("touch", touch))
-    application.add_handler(CommandHandler("history", history))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
