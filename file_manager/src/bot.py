@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 # pylint: disable=unused-argument
 # This program is dedicated to the public domain under the CC0 license.
-
+import json
 import logging
-from telegram import ForceReply, Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import ForceReply, Update, KeyboardButton, WebAppInfo, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackContext
+from credentials import BOT_TOKEN, BOT_USERNAME, WEBAPP_URL
 
 # Enable logging
 logging.basicConfig(
@@ -41,6 +42,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/rename &lt;old_name&gt; &lt;new_name&gt; - Rename a file or directory",
         reply_markup=ForceReply(selective=True),
     )
+    await launch_web_ui(update, context)
+
+
+async def launch_web_ui(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # display our web-app!
+    kb = [
+        [KeyboardButton(
+            "Show me my Web-App!",
+            web_app=WebAppInfo(WEBAPP_URL)
+        )]
+    ]
+    await update.message.reply_text("Let's do this...1.0", reply_markup=ReplyKeyboardMarkup(kb))
 
 
 async def make_directory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -164,9 +177,39 @@ async def rename_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"'{old_name}' not found in the current directory.")
 
 
+async def web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    json1 = json.loads(update.message.web_app_data.data)
+    action = json1[0]
+    if action == 'get_time' or action == '"get_time"':
+        from datetime import datetime
+        current_time = datetime.now().strftime("%H:%M:%S")
+        await update.message.reply_text(f"Текущее время: {current_time}")
+    if action == 'start':
+        await start(update, context)
+    if action == 'md':
+        context.args = [json1[1]]
+        await make_directory(update, context)
+    if action == 'cd':
+        context.args = [json1[1]]
+        await change_directory(update, context)
+    if action == 'ls':
+        await list_directory(update, context)
+    if action == 'touch':
+        await touch(update, context)
+    if action == 'get':
+        context.args = [json1[1]]
+        await get_file(update, context)
+    if action == 'del':
+        context.args = [json1[1]]
+        await delete_item(update, context)
+    if action == 'rename':
+        context.args = [json1[1], json1[2]]
+        await rename_item(update, context)
+
+
 def main() -> None:
     """Start the bot."""
-    application = Application.builder().token("7482872404:AAFjK42XWPajU_VGu71vTBkTt8rqQCGdArk").build()
+    application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("md", make_directory))
@@ -177,7 +220,9 @@ def main() -> None:
     application.add_handler(CommandHandler("del", delete_item))
     application.add_handler(CommandHandler("rename", rename_item))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data))
 
+    print(f"Your bot is listening! Navigate to http://t.me/{BOT_USERNAME} to interact with it!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
